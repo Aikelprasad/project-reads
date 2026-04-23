@@ -1,0 +1,41 @@
+name: Project Reads CI/CD
+
+on:
+  push:
+    branches: [ "main", "master" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Java Environment
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          
+      - name: Maven Build Check
+        run: |
+          cd project-reads
+          mvn clean package -DskipTests
+
+      - name: Setup Node Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: React Build Check
+        run: |
+          cd "project reads web"
+          npm install
+          npm run build
+
+  trigger-deployment:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render to Deploy Backend
+        run: curl -X POST ${{ secrets.RENDER_WEBHOOK }}
