@@ -16,6 +16,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api")
+@CrossOrigin(origins = "*", allowedHeaders = "*", methods = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.DELETE, RequestMethod.OPTIONS})
 public class LibraryController {
 
     private final BookRepository bookRepository;
@@ -24,9 +25,7 @@ public class LibraryController {
     public LibraryController(BookRepository bookRepository) {
         this.bookRepository = bookRepository;
         try { 
-            if (!Files.exists(root)) {
-                Files.createDirectories(root);
-            }
+            Files.createDirectories(root); 
         } catch (IOException e) { 
             throw new RuntimeException("Could not initialize upload folder!", e); 
         }
@@ -56,33 +55,77 @@ public class LibraryController {
         book.setAvailableCopies(copies);
         book.setFilePath(filename); 
         book.setCoverImage(coverFilename);
+        book.setReviews(""); 
         book.setActiveRentals("");
         return bookRepository.save(book);
     }
 
-    @PostMapping("/rent/{bookId}/{username}")
-    public Book rentBook(@PathVariable Long bookId, @PathVariable String username) {
-        Book book = bookRepository.findById(bookId).orElseThrow(() -> new RuntimeException("Book not found"));
-        if (book.getAvailableCopies() > 0) {
-            book.setAvailableCopies(book.getAvailableCopies() - 1);
-            // Append username to rentals tracking
-            book.setActiveRentals(book.getActiveRentals() + username + ",");
-            return bookRepository.save(book);
+    @PostMapping("/books/{id}/update")
+    public Book updateBook(@PathVariable Long id, 
+                           @RequestParam("title") String title, 
+                           @RequestParam("author") String author, 
+                           @RequestParam("copies") int copies,
+                           @RequestParam(value = "cover", required = false) MultipartFile cover) throws Exception {
+        
+        Book book = bookRepository.findById(id).orElseThrow();
+        book.setTitle(title); 
+        book.setAuthor(author); 
+        book.setAvailableCopies(copies);
+        
+        if (cover != null && !cover.isEmpty()) {
+            String coverFilename = System.currentTimeMillis() + "_cover_" + cover.getOriginalFilename();
+            Files.copy(cover.getInputStream(), this.root.resolve(coverFilename));
+            book.setCoverImage(coverFilename);
         }
-        throw new RuntimeException("No copies available");
-    }
-
-    @PostMapping("/return/{bookId}/{username}")
-    public Book returnBook(@PathVariable Long bookId, @PathVariable String username) {
-        Book book = bookRepository.findById(bookId).orElseThrow(() -> new RuntimeException("Book not found"));
-        book.setAvailableCopies(book.getAvailableCopies() + 1);
-        book.setActiveRentals(book.getActiveRentals().replace(username + ",", ""));
+        
         return bookRepository.save(book);
     }
 
-    @PostMapping("/admin/revoke/{bookId}/{username}")
-    public Book revokeRental(@PathVariable Long bookId, @PathVariable String username) {
-        return returnBook(bookId, username);
+    @PostMapping("/books/{id}/rent")
+    public Book rentBook(@PathVariable Long id, @RequestParam("username") String username) {
+        Book book = bookRepository.findById(id).orElseThrow();
+        String rentals = book.getActiveRentals();
+        
+        if (book.getAvailableCopies() > 0 && !rentals.contains(username + ":")) {
+            book.setAvailableCopies(book.getAvailableCopies() - 1);
+            long rentTime = System.currentTimeMillis(); 
+            book.setActiveRentals(rentals + username + ":" + rentTime + "|||");
+            return bookRepository.save(book);
+        }
+        throw new RuntimeException("Cannot rent");
+    }
+
+    @PostMapping("/books/{id}/revoke")
+    public Book revokeAccess(@PathVariable Long id, @RequestParam("username") String username) {
+        Book book = bookRepository.findById(id).orElseThrow();
+        String[] rentalArray = book.getActiveRentals().split("\\|\\|\\|");
+        StringBuilder newRentals = new StringBuilder();
+        boolean revoked = false;
+        
+        for (String r : rentalArray) {
+            if (!r.trim().isEmpty()) {
+                if (r.startsWith(username + ":")) {
+                    revoked = true;
+                } else {
+                    newRentals.append(r).append("|||");
+                }
+            }
+        }
+        
+        if (revoked) {
+            book.setActiveRentals(newRentals.toString());
+            book.setAvailableCopies(book.getAvailableCopies() + 1);
+            return bookRepository.save(book);
+        }
+        return book;
+    }
+
+    @PostMapping("/books/{id}/review")
+    public Book addReview(@PathVariable Long id, @RequestBody String review) {
+        Book book = bookRepository.findById(id).orElseThrow();
+        String current = book.getReviews();
+        book.setReviews((current == null ? "" : current) + review + "|||");
+        return bookRepository.save(book);
     }
 
     @GetMapping("/view/{filename}")
@@ -91,8 +134,16 @@ public class LibraryController {
         Resource resource = new UrlResource(file.toUri());
         
         String contentType = "application/octet-stream";
-        if (filename.toLowerCase().endsWith(".pdf")) contentType = "application/pdf";
-        else if (filename.toLowerCase().endsWith(".epub")) contentType = "application/epub+zip";
+        String lowerName = filename.toLowerCase();
+        
+        if (lowerName.endsWith(".pdf")) {
+            contentType = "application/pdf";
+        } else if (lowerName.endsWith(".epub")) {
+            contentType = "application/epub+zip";
+        } else if (lowerName.matches(".*\\.(png|jpg|jpeg|webp|gif)$")) {
+            String ext = lowerName.substring(lowerName.lastIndexOf('.') + 1);
+            contentType = "image/" + (ext.equals("jpg") ? "jpeg" : ext);
+        }
         
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(contentType))

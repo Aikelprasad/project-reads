@@ -1,13 +1,25 @@
 package com.aikel.projectreads.controller;
 
+import java.time.LocalDateTime;
+import java.util.List;
+
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RestController;
+
 import com.aikel.projectreads.entity.Member;
 import com.aikel.projectreads.repository.MemberRepository;
+
 import jakarta.annotation.PostConstruct;
-import org.springframework.web.bind.annotation.*;
-import java.util.Map;
 
 @RestController
-@RequestMapping("/auth")
+@RequestMapping("/api/auth")
+@CrossOrigin(origins = "*", allowedHeaders = "*", methods = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.DELETE, RequestMethod.OPTIONS})
 public class AuthController {
 
     private final MemberRepository memberRepository;
@@ -16,41 +28,41 @@ public class AuthController {
         this.memberRepository = memberRepository;
     }
 
-    // Initialize Admin Account if it doesn't exist
+    // This creates your master Admin account automatically if it doesn't exist
     @PostConstruct
-    public void initAdmin() {
+    public void init() {
         if (memberRepository.findByUsername("admin").isEmpty()) {
             Member admin = new Member();
             admin.setUsername("admin");
-            admin.setPassword("admin123");
+            admin.setPassword("admin123"); // Default password
+            admin.setRole("admin");
             memberRepository.save(admin);
         }
     }
 
-    @PostMapping("/login")
-    public Map<String, String> login(@RequestBody Map<String, String> credentials) {
-        String username = credentials.get("username");
-        String password = credentials.get("password");
-
-        // Use the Optional fix here
-        Member member = memberRepository.findByUsername(username).orElse(null);
-        
-        if (member != null && member.getPassword().equals(password)) {
-            // Check if it's the admin account
-            if ("admin".equals(username) || "aikel".equals(username)) {
-                return Map.of("role", "ADMIN", "username", username);
-            }
-            return Map.of("role", "MEMBER", "username", username);
+    @PostMapping("/register")
+    public ResponseEntity<?> register(@RequestBody Member member) {
+        if (memberRepository.findByUsername(member.getUsername()).isPresent()) {
+            return ResponseEntity.badRequest().body("{\"error\": \"Username already taken\"}");
         }
-
-        throw new RuntimeException("Invalid Credentials");
+        member.setRole("user");
+        return ResponseEntity.ok(memberRepository.save(member));
     }
 
-    @PostMapping("/register")
-    public Member register(@RequestBody Member member) {
-        if (memberRepository.findByUsername(member.getUsername()).isPresent()) {
-            throw new RuntimeException("Username already exists");
+    @PostMapping("/login")
+    public ResponseEntity<?> login(@RequestBody Member credentials) {
+        Member member = memberRepository.findByUsername(credentials.getUsername()).orElse(null);
+        if (member != null && member.getPassword().equals(credentials.getPassword())) {
+            // Track the login time
+            member.setLastLogin(LocalDateTime.now());
+            memberRepository.save(member);
+            return ResponseEntity.ok(member);
         }
-        return memberRepository.save(member);
+        return ResponseEntity.status(401).body("{\"error\": \"Invalid credentials\"}");
+    }
+
+    @GetMapping("/logs")
+    public List<Member> getLogs() {
+        return memberRepository.findAll();
     }
 }
