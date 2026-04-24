@@ -16,7 +16,6 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api")
-@CrossOrigin(origins = "*", allowedHeaders = "*", methods = {RequestMethod.GET, RequestMethod.POST, RequestMethod.OPTIONS})
 public class LibraryController {
 
     private final BookRepository bookRepository;
@@ -57,9 +56,33 @@ public class LibraryController {
         book.setAvailableCopies(copies);
         book.setFilePath(filename); 
         book.setCoverImage(coverFilename);
-        book.setReviews(""); 
         book.setActiveRentals("");
         return bookRepository.save(book);
+    }
+
+    @PostMapping("/rent/{bookId}/{username}")
+    public Book rentBook(@PathVariable Long bookId, @PathVariable String username) {
+        Book book = bookRepository.findById(bookId).orElseThrow(() -> new RuntimeException("Book not found"));
+        if (book.getAvailableCopies() > 0) {
+            book.setAvailableCopies(book.getAvailableCopies() - 1);
+            // Append username to rentals tracking
+            book.setActiveRentals(book.getActiveRentals() + username + ",");
+            return bookRepository.save(book);
+        }
+        throw new RuntimeException("No copies available");
+    }
+
+    @PostMapping("/return/{bookId}/{username}")
+    public Book returnBook(@PathVariable Long bookId, @PathVariable String username) {
+        Book book = bookRepository.findById(bookId).orElseThrow(() -> new RuntimeException("Book not found"));
+        book.setAvailableCopies(book.getAvailableCopies() + 1);
+        book.setActiveRentals(book.getActiveRentals().replace(username + ",", ""));
+        return bookRepository.save(book);
+    }
+
+    @PostMapping("/admin/revoke/{bookId}/{username}")
+    public Book revokeRental(@PathVariable Long bookId, @PathVariable String username) {
+        return returnBook(bookId, username);
     }
 
     @GetMapping("/view/{filename}")
